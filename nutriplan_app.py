@@ -138,13 +138,22 @@ st.markdown(f"""
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# ── Chave da API ───────────────────────────────────────────────────
+# ── Chave da API — Secrets (online) ou campo manual (local) ────────
+try:
+    api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
+except Exception:
+    api_key = ""
+
 with st.sidebar:
     st.markdown(f"### ⚙️ Configuração")
-    api_key = st.text_input("Chave da API (Anthropic)",
-                            type="password",
-                            placeholder="sk-ant-...",
-                            help="Encontre em console.anthropic.com → API Keys")
+    if api_key:
+        st.success("✅ Chave da API configurada")
+    else:
+        api_key = st.text_input(
+            "Chave da API (Anthropic)",
+            type="password",
+            placeholder="sk-ant-...",
+            help="Encontre em console.anthropic.com → API Keys")
     st.markdown("---")
     st.markdown(f"**{NOME}**")
     st.markdown(f"{TITULO} • {CRN}")

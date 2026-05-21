@@ -397,8 +397,7 @@ TOTAL: X kcal | Xg proteína | Xg carboidrato
     # Exibe resultado
     resultado = st.session_state.get("resultado","")
     if resultado:
-        st.markdown(f'<div class="resultado-box">{resultado}</div>',
-                    unsafe_allow_html=True)
+        st.markdown(resultado)
         st.markdown('<p class="aviso">⚠️ Plano gerado com auxílio de IA. Revise antes de prescrever.</p>',
                     unsafe_allow_html=True)
 
@@ -536,11 +535,57 @@ TOTAL: X kcal | Xg proteína | Xg carboidrato
 
                 doc.add_paragraph()
 
-                # Conteúdo
-                for linha in resultado.split("\n"):
-                    s = linha.strip()
+                # Conteúdo — reconhece tabelas markdown
+                linhas = resultado.split("\n")
+                i_linha = 0
+                while i_linha < len(linhas):
+                    s = linhas[i_linha].strip()
+
+                    # Detecta bloco de tabela markdown
+                    if s.startswith("|") and i_linha+1 < len(linhas) and linhas[i_linha+1].strip().startswith("|---"):
+                        # Coleta todas as linhas da tabela
+                        tbl_linhas = []
+                        while i_linha < len(linhas) and linhas[i_linha].strip().startswith("|"):
+                            row_s = linhas[i_linha].strip()
+                            if not all(c in "-|: " for c in row_s):  # ignora separador
+                                cols = [c.strip().strip("*") for c in row_s.split("|") if c.strip()]
+                                tbl_linhas.append(cols)
+                            i_linha += 1
+
+                        if tbl_linhas:
+                            max_cols = max(len(r) for r in tbl_linhas)
+                            from docx.shared import Inches
+                            tbl = doc.add_table(rows=len(tbl_linhas), cols=max_cols)
+                            tbl.style = "Table Grid"
+                            from docx.oxml.ns import qn as qn2
+                            from docx.oxml import OxmlElement as OE2
+                            for ri, row_data in enumerate(tbl_linhas):
+                                for ci, val in enumerate(row_data):
+                                    if ci >= max_cols: break
+                                    cell = tbl.cell(ri, ci)
+                                    # Cor de fundo alternada
+                                    tc = cell._tc
+                                    tcPr = tc.get_or_add_tcPr()
+                                    shd = OE2("w:shd")
+                                    shd.set(qn2("w:val"), "clear")
+                                    shd.set(qn2("w:color"), "auto")
+                                    bg = "E8D5CC" if ri == 0 else ("FFFFFF" if ri%2==0 else "F5EDE8")
+                                    shd.set(qn2("w:fill"), bg)
+                                    tcPr.append(shd)
+                                    # Texto
+                                    is_sub = "(pode substituir" in val.lower()
+                                    p = cell.paragraphs[0]
+                                    run = p.add_run(val)
+                                    run.font.name = "Georgia"
+                                    run.font.size = Pt(8)
+                                    run.font.bold = (ri == 0)
+                                    run.font.color.rgb = hex_rgb(COR_VERDE if is_sub else COR_TEXTO)
+                                    run.font.italic = is_sub
+                            doc.add_paragraph()
+                        continue
+
                     if not s:
-                        doc.add_paragraph()
+                        i_linha += 1
                         continue
                     if s.startswith("## "):
                         doc.add_paragraph()
@@ -575,10 +620,11 @@ TOTAL: X kcal | Xg proteína | Xg carboidrato
                         p = doc.add_paragraph()
                         p.paragraph_format.space_after=Pt(2)
                         partes = s.split("**")
-                        for i, parte in enumerate(partes):
+                        for j, parte in enumerate(partes):
                             if not parte: continue
                             r = p.add_run(parte)
-                            r.font.size=Pt(10); r.font.bold=(i%2==1); r.font.name="Georgia"
+                            r.font.size=Pt(10); r.font.bold=(j%2==1); r.font.name="Georgia"
+                    i_linha += 1
 
                 # Assinatura
                 doc.add_paragraph()
@@ -713,12 +759,64 @@ TOTAL: X kcal | Xg proteína | Xg carboidrato
                 ws.column_dimensions["E"].width = 18
                 ws.column_dimensions["F"].width = 36
 
-                # Parseia o resultado
+                # Parseia o resultado — reconhece tabelas markdown
+                import re as _re
+                def extrair_num(txt):
+                    m = _re.search(r"[\d]+[.,]?[\d]*", txt.replace(",","."))
+                    return float(m.group().replace(",",".")) if m else ""
+
                 row = 8
+                linhas_res = resultado.split("\n")
+                ir = 0
                 refeicao_atual = None
-                for linha in resultado.split("\n"):
-                    s = linha.strip()
+                while ir < len(linhas_res):
+                    s = linhas_res[ir].strip()
+
+                    # Tabela markdown — cabeçalho seguido de separador |---|
+                    if (s.startswith("|") and
+                        ir+1 < len(linhas_res) and
+                        linhas_res[ir+1].strip().startswith("|---")):
+
+                        # Pula cabeçalho e separador
+                        ir += 2
+                        # Lê linhas de dados da tabela
+                        while ir < len(linhas_res) and linhas_res[ir].strip().startswith("|"):
+                            row_s = linhas_res[ir].strip()
+                            cols = [c.strip().strip("*") for c in row_s.split("|") if c.strip()]
+                            if len(cols) >= 2:
+                                alimento = cols[0] if len(cols) > 0 else ""
+                                qtd      = cols[1] if len(cols) > 1 else ""
+                                cal      = extrair_num(cols[2]) if len(cols) > 2 else ""
+                                prot     = extrair_num(cols[3]) if len(cols) > 3 else ""
+                                carb     = extrair_num(cols[4]) if len(cols) > 4 else ""
+                                sub      = cols[5] if len(cols) > 5 else ""
+
+                                # Ignora linhas só com "pode substituir"
+                                if "(pode substituir" in alimento.lower():
+                                    # coloca sub na linha anterior
+                                    if row > 8:
+                                        ws.cell(row=row-1, column=6).value = alimento
+                                    ir += 1
+                                    continue
+
+                                fill_linha = fill_branco if row % 2 == 0 else fill_bege
+                                for ci, val in enumerate([alimento, qtd, cal, prot, carb, sub], 1):
+                                    c = ws.cell(row=row, column=ci, value=val)
+                                    c.font = Font(name="Georgia", size=9,
+                                                  italic=(ci==6),
+                                                  color="8BBCB0" if ci==6 else "3A2E2A")
+                                    c.fill = fill_sub if ci==6 else fill_linha
+                                    c.alignment = Alignment(
+                                        horizontal="center" if ci>1 else "left",
+                                        vertical="center", wrap_text=True)
+                                    c.border = Border(bottom=Side(style="thin", color="E8D5CC"))
+                                ws.row_dimensions[row].height = 18
+                                row += 1
+                            ir += 1
+                        continue
+
                     if not s:
+                        ir += 1
                         continue
 
                     if s.startswith("## ") or s.startswith("# "):
@@ -733,53 +831,18 @@ TOTAL: X kcal | Xg proteína | Xg carboidrato
                         refeicao_atual = titulo
                         row += 1
 
-                    elif s.startswith("- ") or s.startswith("* "):
-                        texto = s[2:].strip()
-                        sub = ""
-                        if "(pode substituir" in texto.lower():
-                            partes = texto.split("(pode substituir")
-                            texto = partes[0].strip()
-                            sub = "(pode substituir" + partes[1]
-
-                        # Tenta parsear colunas separadas por |
-                        partes_pipe = [p.strip() for p in texto.split("|")]
-                        alimento  = partes_pipe[0] if len(partes_pipe) > 0 else texto
-                        qtd       = partes_pipe[1] if len(partes_pipe) > 1 else ""
-                        cal_str   = partes_pipe[2] if len(partes_pipe) > 2 else ""
-                        prot_str  = partes_pipe[3] if len(partes_pipe) > 3 else ""
-                        carb_str  = partes_pipe[4] if len(partes_pipe) > 4 else ""
-
-                        def extrair_num(s):
-                            import re
-                            m = re.search(r"[\d]+\.?[\d]*", s.replace(",","."))
-                            return float(m.group()) if m else ""
-
-                        fill_linha = fill_branco if row % 2 == 0 else fill_bege
-                        for ci, val in enumerate([alimento, qtd,
-                                                  extrair_num(cal_str),
-                                                  extrair_num(prot_str),
-                                                  extrair_num(carb_str),
-                                                  sub], 1):
-                            c = ws.cell(row=row, column=ci, value=val)
-                            c.font = Font(name="Georgia", size=9,
-                                          italic=(ci==6),
-                                          color="8BBCB0" if ci==6 else "3A2E2A")
-                            c.fill = fill_sub if ci==6 else fill_linha
-                            c.alignment = Alignment(horizontal="center" if ci>1 else "left",
-                                                    vertical="center", wrap_text=True)
-                            c.border = Border(bottom=Side(style="thin", color="E8D5CC"))
-                        ws.row_dimensions[row].height = 18
-                        row += 1
-
-                    elif "TOTAL" in s.upper() and ":" in s:
+                    elif "TOTAL" in s.upper() and (":" in s or "|" in s):
+                        clean = s.replace("**","").replace("🔸","").strip()
                         ws.merge_cells(f"A{row}:F{row}")
-                        c = ws.cell(row=row, column=1, value=s)
+                        c = ws.cell(row=row, column=1, value=clean)
                         c.font = Font(name="Georgia", size=9, bold=True, color="3A2E2A")
                         c.fill = fill_bege_e
                         c.alignment = Alignment(horizontal="right", vertical="center")
                         c.border = Border(top=Side(style="thin", color="C97B7B"))
                         ws.row_dimensions[row].height = 16
                         row += 1
+
+                    ir += 1
 
                 # ── Aba 2: Cálculos ──
                 ws2 = wb.create_sheet("Cálculos Nutricionais")

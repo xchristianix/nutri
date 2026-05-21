@@ -800,7 +800,17 @@ TOTAL: X kcal | Xg proteína | Xg carboidrato
                                     continue
 
                                 fill_linha = fill_branco if row % 2 == 0 else fill_bege
-                                for ci, val in enumerate([alimento, qtd, cal, prot, carb, sub], 1):
+                                # Arredonda números
+                                def fmt_num(v):
+                                    if isinstance(v, float):
+                                        return round(v, 1)
+                                    return v
+
+                                for ci, val in enumerate([alimento, qtd,
+                                                          fmt_num(cal),
+                                                          fmt_num(prot),
+                                                          fmt_num(carb),
+                                                          sub], 1):
                                     c = ws.cell(row=row, column=ci, value=val)
                                     c.font = Font(name="Georgia", size=9,
                                                   italic=(ci==6),
@@ -810,6 +820,9 @@ TOTAL: X kcal | Xg proteína | Xg carboidrato
                                         horizontal="center" if ci>1 else "left",
                                         vertical="center", wrap_text=True)
                                     c.border = Border(bottom=Side(style="thin", color="E8D5CC"))
+                                    # Formato numérico para colunas de cálculo
+                                    if ci in (3, 4, 5) and isinstance(fmt_num(val), float):
+                                        c.number_format = "0.0"
                                 ws.row_dimensions[row].height = 18
                                 row += 1
                             ir += 1

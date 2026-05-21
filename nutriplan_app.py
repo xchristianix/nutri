@@ -384,7 +384,7 @@ TOTAL: X kcal | Xg proteína | Xg carboidrato
             try:
                 client = anthropic.Anthropic(api_key=api_key)
                 msg = client.messages.create(
-                    model="claude-opus-4-5",
+                    model="claude-3-5-sonnet",
                     max_tokens=4096,
                     messages=[{"role":"user","content":prompt}]
                 )
